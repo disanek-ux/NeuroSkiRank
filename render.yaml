@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: neurosci-backend
+    env: node
+    plan: free
+    buildCommand: pnpm install && pnpm build
+    startCommand: pnpm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: neurosci-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: VITE_APP_ID
+        sync: false
+      - key: OAUTH_SERVER_URL
+        value: https://api.manus.im
+      - key: OWNER_OPEN_ID
+        sync: false
+      - key: OWNER_NAME
+        sync: false
+      - key: VITE_OAUTH_PORTAL_URL
+        value: https://manus.im/oauth
+      - key: VITE_APP_TITLE
+        value: NeuroSciRank
+      - key: VITE_APP_LOGO
+        value: /logo.svg
+
+databases:
+  - name: neurosci-db
+    databaseName: neurosci
+    user: neurosci_user
+    plan: free

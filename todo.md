@@ -90,3 +90,12 @@
 - [ ] Implement user profile customization
 - [ ] Add publication filtering/sorting options
 - [ ] Implement notification system for ranking updates
+
+
+## Deployment & Telegram Integration
+- [x] Update tRPC client to use environment API URL
+- [x] Create .env.example file for reference
+- [x] Add Netlify build configuration
+- [x] Add Render deployment configuration
+- [x] Create Telegram Bot integration guide
+- [x] Create comprehensive deployment guide

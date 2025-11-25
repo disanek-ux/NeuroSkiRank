@@ -1,0 +1,34 @@
+[build]
+  command = "pnpm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22.13.0"
+  PNPM_VERSION = "10.4.1"
+
+# Redirect all API calls to the backend
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+
+# Single Page Application (SPA) routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Environment variables (set these in Netlify UI)
+# VITE_API_URL=https://neurosci-backend.onrender.com
+# VITE_OAUTH_PORTAL_URL=https://manus.im/oauth
+# VITE_APP_TITLE=NeuroSciRank
+# VITE_APP_LOGO=/logo.svg
+
+[context.production]
+  environment = { VITE_API_URL = "https://neurosci-backend.onrender.com" }
+
+[context.deploy-preview]
+  environment = { VITE_API_URL = "https://neurosci-backend.onrender.com" }
+
+[context.branch-deploy]
+  environment = { VITE_API_URL = "https://neurosci-backend.onrender.com" }
