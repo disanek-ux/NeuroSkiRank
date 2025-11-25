@@ -1,7 +1,18 @@
-import { eq } from "drizzle-orm";
+import { eq, and, desc, asc, gte, lte, sql, ilike, or, isNotNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
-import { ENV } from './_core/env';
+import {
+  InsertUser,
+  users,
+  publications,
+  userRatings,
+  publicationScores,
+  rankingHistory,
+  InsertPublication,
+  InsertUserRating,
+  InsertPublicationScore,
+  InsertRankingHistory,
+} from "../drizzle/schema";
+import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -17,6 +28,10 @@ export async function getDb() {
   }
   return _db;
 }
+
+// ============================================================================
+// USER MANAGEMENT
+// ============================================================================
 
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) {
@@ -35,7 +50,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     };
     const updateSet: Record<string, unknown> = {};
 
-    const textFields = ["name", "email", "loginMethod"] as const;
+    const textFields = ["name", "email", "loginMethod", "field", "institution", "bio", "orcidId"] as const;
     type TextField = (typeof textFields)[number];
 
     const assignNullable = (field: TextField) => {
@@ -56,8 +71,8 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       values.role = user.role;
       updateSet.role = user.role;
     } else if (user.openId === ENV.ownerOpenId) {
-      values.role = 'admin';
-      updateSet.role = 'admin';
+      values.role = "admin";
+      updateSet.role = "admin";
     }
 
     if (!values.lastSignedIn) {
@@ -84,9 +99,254 @@ export async function getUserByOpenId(openId: string) {
     return undefined;
   }
 
-  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
+  const result = await db
+    .select()
+    .from(users)
+    .where(eq(users.openId, openId))
+    .limit(1);
 
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+export async function getUserById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, id))
+    .limit(1);
+
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function updateUserProfile(
+  userId: number,
+  updates: {
+    name?: string;
+    field?: string;
+    institution?: string;
+    bio?: string;
+  }
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.update(users).set(updates).where(eq(users.id, userId));
+}
+
+// ============================================================================
+// PUBLICATION MANAGEMENT
+// ============================================================================
+
+export async function createPublication(publication: InsertPublication) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(publications).values(publication);
+  return result;
+}
+
+export async function getPublicationByDoiAndUser(doi: string, userId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db
+    .select()
+    .from(publications)
+    .where(and(eq(publications.doi, doi), eq(publications.userId, userId)))
+    .limit(1);
+
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function getUserPublications(userId: number, limit = 100, offset = 0) {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db
+    .select()
+    .from(publications)
+    .where(eq(publications.userId, userId))
+    .orderBy(desc(publications.year), desc(publications.createdAt))
+    .limit(limit)
+    .offset(offset);
+}
+
+export async function getPublicationById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db
+    .select()
+    .from(publications)
+    .where(eq(publications.id, id))
+    .limit(1);
+
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function deletePublication(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.delete(publications).where(eq(publications.id, id));
+}
+
+// ============================================================================
+// RANKING & SCORING
+// ============================================================================
+
+export async function upsertUserRating(rating: InsertUserRating) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db
+    .insert(userRatings)
+    .values(rating)
+    .onDuplicateKeyUpdate({
+      set: {
+        score: rating.score,
+        rank: rating.rank,
+        publicationCount: rating.publicationCount,
+        computedAt: rating.computedAt,
+      },
+    });
+}
+
+export async function getUserRating(userId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db
+    .select()
+    .from(userRatings)
+    .where(eq(userRatings.userId, userId))
+    .limit(1);
+
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function getTopRankedUsers(limit = 50, offset = 0) {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db
+    .select({
+      id: users.id,
+      name: users.name,
+      field: users.field,
+      institution: users.institution,
+      score: userRatings.score,
+      rank: userRatings.rank,
+      publicationCount: userRatings.publicationCount,
+    })
+    .from(userRatings)
+    .innerJoin(users, eq(userRatings.userId, users.id))
+    .where(isNotNull(userRatings.rank))
+    .orderBy(asc(userRatings.rank))
+    .limit(limit)
+    .offset(offset);
+}
+
+export async function getAllUsersForRanking() {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select({ id: users.id }).from(users);
+}
+
+export async function createPublicationScore(score: InsertPublicationScore) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.insert(publicationScores).values(score);
+}
+
+export async function deletePublicationScoresForUser(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.delete(publicationScores).where(eq(publicationScores.userId, userId));
+}
+
+// ============================================================================
+// RANKING HISTORY
+// ============================================================================
+
+export async function recordRankingHistory(history: InsertRankingHistory) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.insert(rankingHistory).values(history);
+}
+
+export async function getUserRankingHistory(userId: number, days = 90) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - days);
+
+  return await db
+    .select()
+    .from(rankingHistory)
+    .where(
+      and(
+        eq(rankingHistory.userId, userId),
+        gte(rankingHistory.recordedAt, cutoffDate)
+      )
+    )
+    .orderBy(asc(rankingHistory.recordedAt));
+}
+
+// ============================================================================
+// SEARCH
+// ============================================================================
+
+export async function searchUsers(query: string, limit = 20, offset = 0) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const searchTerm = `%${query}%`;
+
+  return await db
+    .select({
+      id: users.id,
+      name: users.name,
+      field: users.field,
+      institution: users.institution,
+    })
+    .from(users)
+    .where(
+      or(
+        ilike(users.name, searchTerm),
+        ilike(users.field, searchTerm),
+        ilike(users.institution, searchTerm)
+      )
+    )
+    .limit(limit)
+    .offset(offset);
+}
+
+export async function searchPublications(query: string, limit = 20, offset = 0) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const searchTerm = `%${query}%`;
+
+  return await db
+    .select()
+    .from(publications)
+    .where(
+      or(
+        ilike(publications.title, searchTerm),
+        ilike(publications.journal, searchTerm),
+        ilike(publications.doi, searchTerm)
+      )
+    )
+    .orderBy(desc(publications.year))
+    .limit(limit)
+    .offset(offset);
+}
